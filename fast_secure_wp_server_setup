@@ -407,7 +407,7 @@ apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xF1656F24C74C
 add-apt-repository 'deb [arch=amd64,i386,ppc64el] http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main'
 
 # certbot repo
-add-apt-repository ppa:certbot/certbot
+add-apt-repository -y ppa:certbot/certbot
 
 cmn_echo_info "Keys and repositories installed."
 
@@ -473,7 +473,7 @@ server {
   server_name ${DOMAIN} ${WWW_DOMAIN};
 
   location / {
-    try_files $uri $uri/ =404;
+    try_files \$uri \$uri/ =404;
   }
 
   location ~ \.php$ {
@@ -558,7 +558,7 @@ cmn_echo_info "Updating nginx configuration..."
 
 cat > /etc/nginx/sites-available/default <<EOC
 fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
-fastcgi_cache_key "$scheme$request_method$host$request_uri";
+fastcgi_cache_key "\$scheme\$request_method\$host\$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
 fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
 
@@ -572,8 +572,8 @@ server {
   include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
 
   # force redirect to HTTPS from HTTP
-  if ($scheme != "https") {
-    return 301 https://$host$request_uri;
+  if (\$scheme != "https") {
+    return 301 https://\$host\$request_uri;
   }
 
   client_max_body_size 256M;
@@ -582,30 +582,30 @@ server {
 
   server_name ${DOMAIN} ${WWW_DOMAIN};
 
-  set $skip_cache 0;
+  set \$skip_cache 0;
 
-  if ($request_method = POST) {
-    set $skip_cache 1;
+  if (\$request_method = POST) {
+    set \$skip_cache 1;
   }
 
-  if ($query_string != "") {
-    set $skip_cache 1;
+  if (\$query_string != "") {
+    set \$skip_cache 1;
   }
 
-  if ($request_uri ~* "/wp-admin/|/xmlrpc.php|wp-.*.php|/feed/|index.php|sitemap(_index)?.xml") {
-    set $skip_cache 1;
+  if (\$request_uri ~* "/wp-admin/|/xmlrpc.php|wp-.*.php|/feed/|index.php|sitemap(_index)?.xml") {
+    set \$skip_cache 1;
   }
 
-  if ($http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
-    set $skip_cache 1;
+  if (\$http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
+    set \$skip_cache 1;
   }
 
   location ~ /purge(/.*) {
-    fastcgi_cache_purge WORDPRESS "$scheme$request_method$host$1";
+    fastcgi_cache_purge WORDPRESS "\$scheme\$request_method\$host\$1";
   }
 
   location / {
-    try_files $uri $uri/ /index.php?$args;
+    try_files \$uri \$uri/ /index.php?\$args;
   }
 
   # Turn off directory indexing
@@ -622,23 +622,23 @@ server {
   }
 
   # Deny access to revealing or potentially dangerous files in the /wp-content/ directory (including sub-folders)
-  location ~* ^/wp-content/.*\.(txt|md|exe|sh|bak|inc|pot|po|mo|log|sql)$ {
+  location ~* ^/wp-content/.*\.(txt|md|exe|sh|bak|inc|pot|po|mo|log|sql)\$ {
     deny all;
   }
 
   # Stop php access except to needed files in wp-includes
-  location ~* ^/wp-includes/.*(?<!(js/tinymce/wp-tinymce))\.php$ {
+  location ~* ^/wp-includes/.*(?<!(js/tinymce/wp-tinymce))\.php\$ {
     internal; #internal allows ms-files.php rewrite in multisite to work
   }
 
   # Specifically locks down upload directories in case full wp-content rule below is skipped
-  location ~* /(?:uploads|files)/.*\.php$ {
+  location ~* /(?:uploads|files)/.*\.php\$ {
     deny all;
   }
 
   # Deny direct access to .php files in the /wp-content/ directory (including sub-folders).
   # Note this can break some poorly coded plugins/themes, replace the plugin or remove this block if it causes trouble
-  location ~* ^/wp-content/.*\.php$ {
+  location ~* ^/wp-content/.*\.php\$ {
     deny all;
   }
 
@@ -652,11 +652,11 @@ server {
     log_not_found off;
   }
 
-  location ~ \.php$ {
+  location ~ \.php\$ {
     include snippets/fastcgi-php.conf;
     fastcgi_pass unix:/run/php/php7.0-fpm.sock;
-    fastcgi_cache_bypass $skip_cache;
-    fastcgi_no_cache $skip_cache;
+    fastcgi_cache_bypass \$skip_cache;
+    fastcgi_no_cache \$skip_cache;
     fastcgi_cache WORDPRESS;
     fastcgi_cache_valid 60m;
     include fastcgi_params;
