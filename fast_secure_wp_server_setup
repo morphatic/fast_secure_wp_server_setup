@@ -172,7 +172,12 @@ function cmn_die {
 
 function not_valid_password {
   local pw="${1}"
-  [[ ! ( ${#pw} -ge 12 && "${pw}" =~ .*[A-Z].* && "${pw}" =~ .*[a-z].* && "${pw}" =~ .*[0-9].* && "${pw}" =~ .*[[:punct:]].* ) ]]
+  local pwtype="${2}"
+  if [[ "${pwtype}" == 'mailgun' ]]; then
+    [[ ! ( ${#pw} -ge 12 && "${pw}" =~ .*[a-z].* && "${pw}" =~ .*[0-9].* ) ]]
+  else
+    [[ ! ( ${#pw} -ge 12 && "${pw}" =~ .*[A-Z].* && "${pw}" =~ .*[a-z].* && "${pw}" =~ .*[0-9].* && "${pw}" =~ .*[[:punct:]].* ) ]]
+  fi
 }
 
 # cmn_ask_for_password variable_name prompt
@@ -250,6 +255,7 @@ function cmn_ask_for_password {
 function cmn_ask_for_password_twice {
   local VARIABLE_NAME=${1}
   local MESSAGE=${2}
+  local PWTYPE=${3:=other}
   local VARIABLE_NAME_1="${VARIABLE_NAME}_1"
   local VARIABLE_NAME_2="${VARIABLE_NAME}_2"
 
@@ -371,7 +377,7 @@ if $USING_MAILGUN; then
   while [[ '' == "${MG_USERNAME}" ]]; do
     read -p 'Enter your mailgun username: ' MG_USERNAME
   done
-  cmn_ask_for_password_twice "MG_PW" "Enter the mailgun password for ${MG_USERNAME}"
+  cmn_ask_for_password_twice "MG_PW" "Enter the mailgun password for ${MG_USERNAME}" "mailgun"
   while [[ '' == "${EMAIL}" ]]; do
     read -p 'Enter the email address where you want to receive server notifications: ' EMAIL
   done
