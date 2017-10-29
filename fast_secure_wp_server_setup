@@ -1,0 +1,751 @@
+#!/bin/bash
+#
+# Installs all of the necessary software to configure a
+# fast, secure, WordPress server running Ubuntu 16.04 LTS
+# following the instructions from the blog post:
+# http://www.morphatic.com/2016/05/21/super-fast-secure-wordpress-install-on-digitalocean-with-nginx-php7-and-ubuntu-16-04-lts/
+# 
+# Version 1.0.0
+# 
+# Author: Morgan Benton<morgan.benton@gmail.com>
+# License: MIT
+
+##########################################################
+# 
+# Utility Functions
+# 
+##########################################################
+
+##########################################################
+# Outputs an informative error message
+# Arguments:
+#   None
+# Returns:
+#   None
+##########################################################
+err() {
+  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $@" >&2
+}
+
+# SEEKING CONFIRMATION
+# ------------------------------------------------------
+# Asks questions of a user and then does something with the answer.
+# y/n are the only possible answers.
+#
+# USAGE:
+# seek_confirmation "Ask a question"
+# if is_confirmed; then
+#   some action
+# else
+#   some other action
+# fi
+#
+# Credt: https://github.com/kevva/dotfiles
+# ------------------------------------------------------
+
+# Ask the question
+function seek_confirmation() {
+  echo ""
+  read -p "${1} (y/n) " -n 1
+  echo ""
+}
+
+# Test whether the result of an 'ask' is a confirmation
+function is_confirmed() {
+  [[ "${REPLY}" =~ ^[Yy]$ ]]
+}
+
+function is_not_confirmed() {
+  [[ "${REPLY}" =~ ^[Nn]$ ]]
+}
+
+#
+# SCRIPT INITIALIZATION --------------------------------------------------------
+#
+
+# cmn_init
+#
+# Should be called at the beginning of every shell script.
+#
+# Exits your script if you try to use an uninitialised variable and exits your
+# script as soon as any statement fails to prevent errors snowballing into
+# serious issues.
+#
+# Example:
+# cmn_init
+#
+# See: http://www.davidpashley.com/articles/writing-robust-shell-scripts/
+#
+function cmn_init {
+  # Will exit script if we would use an uninitialised variable:
+  set -o nounset
+  # Will exit script when a simple command (not a control structure) fails:
+  set -o errexit
+}
+
+# cmn_assert_running_as_root
+#
+# Makes sure that the script is run as root. If it is, the function just
+# returns; if not, it prints an error message and exits with return code 1 by
+# calling `cmn_die`.
+#
+# Example:
+# cmn_assert_running_as_root
+#
+# Note that this function uses variable $EUID which holds the "effective" user
+# ID number; the EUID will be 0 even though the current user has gained root
+# priviliges by means of su or sudo.
+#
+# See: http://www.linuxjournal.com/content/check-see-if-script-was-run-root-0
+#
+function cmn_assert_running_as_root {
+  if [[ ${EUID} -ne 0 ]]; then
+    cmn_die "This script must be run as root!"
+  fi
+}
+
+#
+# PRINTING TO THE SCREEN -------------------------------------------------------
+#
+
+# cmn_echo_info message ...
+#
+# Writes the given messages in green letters to standard output.
+#
+# Example:
+# cmn_echo_info "Task completed."
+#
+function cmn_echo_info {
+  local green=$(tput setaf 2)
+  local reset=$(tput sgr0)
+  echo -e "${green}$@${reset}"
+}
+
+# cmn_echo_important message ...
+#
+# Writes the given messages in yellow letters to standard output.
+#
+# Example:
+# cmn_echo_important "Please complete the following task manually."
+#
+function cmn_echo_important {
+  local yellow=$(tput setaf 3)
+  local reset=$(tput sgr0)
+  echo -e "${yellow}$@${reset}"
+}
+
+# cmn_echo_warn message ...
+#
+# Writes the given messages in red letters to standard output.
+#
+# Example:
+# cmn_echo_warn "There was a failure."
+#
+function cmn_echo_warn {
+  local red=$(tput setaf 1)
+  local reset=$(tput sgr0)
+  echo -e "${red}$@${reset}"
+}
+
+#
+# ERROR HANDLING ---------------------------------------------------------------
+#
+
+# cmn_die message ...
+#
+# Writes the given messages in red letters to standard error and exits with
+# error code 1.
+#
+# Example:
+# cmn_die "An error occurred."
+#
+function cmn_die {
+  local red=$(tput setaf 1)
+  local reset=$(tput sgr0)
+  echo >&2 -e "${red}$@${reset}"
+  exit 1
+}
+
+#
+# USER INTERACTION -------------------------------------------------------------
+#
+
+function not_valid_password {
+  local pw="${1}"
+  [[ ! ( ${#pw} -ge 12 && "${pw}" =~ .*[A-Z].* && "${pw}" =~ .*[a-z].* && "${pw}" =~ .*[0-9].* && "${pw}" =~ .*[[:punct:]].* ) ]]
+}
+
+# cmn_ask_for_password variable_name prompt
+#
+# Asks the user for her password and stores the password in a read-only
+# variable with the given name.
+#
+# The user is asked with the given message prompt. Note that the given prompt
+# will be complemented with string ": ".
+#
+# This function does not echo nor completely hides the input but echos the
+# asterisk symbol ('*') for each given character. Furthermore, it allows to
+# delete any number of entered characters by hitting the backspace key. The
+# input is concluded by hitting the enter key.
+#
+# Example:
+# cmn_ask_for_password "THEPWD" "Please enter your password"
+#
+# See: http://stackoverflow.com/a/24600839/66981
+#
+function cmn_ask_for_password {
+  local VARIABLE_NAME=${1}
+  local MESSAGE=${2}
+
+  echo -n "${MESSAGE}: "
+  stty -echo
+  local CHARCOUNT=0
+  local PROMPT=''
+  local CHAR=''
+  local PASSWORD=''
+  while IFS= read -p "${PROMPT}" -r -s -n 1 CHAR
+  do
+    # Enter -> accept password
+    if [[ ${CHAR} == $'\0' ]] ; then
+      break
+    fi
+    # Backspace -> delete last char
+    if [[ ${CHAR} == $'\177' ]] ; then
+      if [ ${CHARCOUNT} -gt 0 ] ; then
+        CHARCOUNT=$((CHARCOUNT-1))
+        PROMPT=$'\b \b'
+        PASSWORD="${PASSWORD%?}"
+      else
+        PROMPT=''
+      fi
+    # All other cases -> read last char
+    else
+      CHARCOUNT=$((CHARCOUNT+1))
+      PROMPT='*'
+      PASSWORD+="${CHAR}"
+    fi
+  done
+  stty echo
+  eval ${VARIABLE_NAME}=${PASSWORD}
+  echo
+}
+
+# cmn_ask_for_password_twice variable_name prompt
+#
+# Asks the user for her password twice. If the two inputs match, the given
+# password will be stored in a read-only variable with the given name;
+# otherwise, it exits with return code 1 by calling `cmn_die`.
+#
+# The user is asked with the given message prompt. Note that the given prompt
+# will be complemented with string ": " at the first time and with
+# " (again): " at the second time.
+#
+# This function basically calls `cmn_ask_for_password` twice and compares the
+# two given passwords. If they match, the password will be stored; otherwise,
+# the functions exits by calling `cmn_die`.
+#
+# Example:
+# cmn_ask_for_password_twice "THEPWD" "Please enter your password"
+#
+function cmn_ask_for_password_twice {
+  local VARIABLE_NAME=${1}
+  local MESSAGE=${2}
+  local VARIABLE_NAME_1="${VARIABLE_NAME}_1"
+  local VARIABLE_NAME_2="${VARIABLE_NAME}_2"
+
+  cmn_ask_for_password "${VARIABLE_NAME_1}" "${MESSAGE}"
+  cmn_ask_for_password "${VARIABLE_NAME_2}" "${MESSAGE} (again)"
+
+  while [[ "${!VARIABLE_NAME_1}" != "${!VARIABLE_NAME_2}" ]] || $(not_valid_password ${!VARIABLE_NAME_2}); do
+    if [[ "${!VARIABLE_NAME_1}" != "${!VARIABLE_NAME_2}" ]]; then
+      cmn_echo_important "Oops! The passwords did not match!"
+    else
+      cmn_echo_important "Passwords must be >=12 characters and have at least one upper, lower, digit, and special character"
+    fi
+    cmn_ask_for_password "${VARIABLE_NAME_1}" "${MESSAGE}"
+    cmn_ask_for_password "${VARIABLE_NAME_2}" "${MESSAGE} (again)"
+  done
+
+  eval ${VARIABLE_NAME}="${!VARIABLE_NAME_2}"
+}
+
+#
+# FILE UTILITIES ---------------------------------------------------------------
+#
+
+# cmn_replace_in_files search replace file ...
+#
+# Replaces given string 'search' with 'replace' in given files.
+#
+# Important: The replacement is done in-place. Thus, it overwrites the given
+# files, and no backup files are created.
+#
+# Note that this function is intended to be used to replace fixed strings; i.e.,
+# it does not interpret regular expressions. It was written to replace simple
+# placeholders in sample configuration files (you could say very poor man's
+# templating engine).
+#
+# This functions expects given string 'search' to be found in all the files;
+# thus, it expects to replace that string in all files. If a given file misses
+# that string, a warning is issued by calling `cmn_echo_warn`. Furthermore,
+# if a given file does not exist, a warning is issued as well.
+#
+# To replace the string, perl is used. Pattern metacharacters are quoted
+# (disabled). The search is a global one; thus, all matches are replaced, and
+# not just the first one.
+#
+# Example:
+# cmn_replace_in_files placeholder replacement file1.txt file2.txt
+#
+function cmn_replace_in_files {
+
+  local search=${1}
+  local replace=${2}
+  local files=${@:3}
+
+  for file in ${files[@]}; do
+    if [[ -e "${file}" ]]; then
+      if ( grep --fixed-strings --quiet "${search}" "${file}" ); then
+        perl -pi -e "s/\Q${search}/${replace}/g" "${file}"
+      else
+        cmn_echo_warn "Could not find search string '${search}' (thus, cannot replace with '${replace}') in file: ${file}"
+      fi
+    else
+        cmn_echo_warn "File '${file}' does not exist (thus, cannot replace '${search}' with '${replace}')."
+    fi
+  done
+
+}
+
+# 
+# Useful messages
+# 
+valid_username_message=$(cat <<'END'
+Usernames should start with a lowercase letter or underscore, be between 2 and 32 characters, 
+and only contain lowercase letters, digits, underscores, and dashes. Please pick a username
+other than "root" to use on your server: 
+END
+)
+
+#
+# The Main Script
+# 
+
+# 1. initialize and make sure the command was run with `sudo`
+cmn_init
+cmn_assert_running_as_root
+
+# 2. initialize user variables
+USERNAME=''
+USERPW=''
+DOMAIN=''
+MYSQL_ROOT_PW=''
+MYSQL_USER=''
+MYSQL_USER_PW=''
+USING_MAILGUN=true
+MG_USERNAME=''
+MG_PW=''
+EMAIL=''
+USE_SWAP=true
+
+# 3. get values for the variables from the user
+read -p 'Pick a username other than "root" to use on your server: ' USERNAME
+while [[ "${USERNAME}" == 'root' || ! "${USERNAME}" =~ [a-z_][a-z0-9_-]{1,31} ]]; do
+  read -p "${valid_username_message}" USERNAME
+done
+cmn_ask_for_password_twice "USERPW" "Enter a password for ${USERNAME}"
+read -p 'Enter the domain at which your site will be hosted: ' DOMAIN
+cmn_ask_for_password_twice "MYSQL_ROOT_PW" "Enter a password for the MySQL 'root' user"
+read -p 'Pick a username other than "root" to use for your MySQL database: ' MYSQL_USER
+while [[ "${MYSQL_USER}" == 'root' || ! "${MYSQL_USER}" =~ [a-z_][a-z0-9_-]{1,31} ]]; do
+  read -p "${valid_username_message}" MYSQL_USER
+done
+cmn_ask_for_password_twice "MYSQL_USER_PW" "Enter a password for ${MYSQL_USER}"
+seek_confirmation 'Will you be using mailgun to send admin messages from the server'
+if is_confirmed; then
+  USING_MAILGUN=true
+else
+  USING_MAILGUN=false
+fi
+if $USING_MAILGUN; then
+  while [[ '' == "${MG_USERNAME}" ]]; do
+    read -p 'Enter your mailgun username: ' MG_USERNAME
+  done
+  cmn_ask_for_password_twice "MG_PW" "Enter the mailgun password for ${MG_USERNAME}"
+  while [[ '' == "${EMAIL}" ]]; do
+    read -p 'Enter the email address where you want to receive server notifications: ' EMAIL
+  done
+fi
+seek_confirmation 'Do you want to create a swap file for memory management'
+if is_confirmed; then
+  USE_SWAP=true
+else
+  USE_SWAP=false
+fi
+
+# 4. Install necessary software keys and repositories
+cmn_echo_info "Installing necesary software keys and repositories..."
+
+# rtcamp custom nginx key
+apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3050AC3CD2AE6F03
+sh -c "echo 'deb http://download.opensuse.org/repositories/home:/rtCamp:/EasyEngine/xUbuntu_16.04/ /' >> /etc/apt/sources.list.d/nginx.list"
+
+# mariadb key
+apt-key adv --recv-keys --keyserver hkp://keyserver.ubuntu.com:80 0xF1656F24C74CD1D8
+add-apt-repository 'deb [arch=amd64,i386,ppc64el] http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main'
+
+# certbot repo
+add-apt-repository ppa:certbot/certbot
+
+cmn_echo_info "Keys and repositories installed."
+
+# 5. Install non-interactive software
+cmn_echo_info "Installing non-interactive software"
+
+apt-get update
+apt-get install -y software-properties-common nginx-custom php-fpm php-mysql php-xml php-gd \
+  php-mbstring php-zip php-curl python-certbot-nginx
+
+cmn_echo_info "Non-interactive software installed."
+
+# 6. Install MariaDB
+cmn_echo_info "Installing MariaDB..."
+export DEBIAN_FRONTEND="noninteractive"
+
+debconf-set-selections <<< "mariadb-server mysql-server/root_password password ${MYSQL_ROOT_PW}"
+debconf-set-selections <<< "mariadb-server mysql-server/root_password_again password ${MYSQL_ROOT_PW}"
+apt-get install -y mariadb-server
+
+# run necessary MariaDB queries
+mysql -u "root" -p${MYSQL_ROOT_PW} <<_EOQ_
+  DELETE FROM mysql.user WHERE User='';
+  DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+  DROP DATABASE IF EXISTS test;
+  DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+  CREATE DATABASE ${MYSQL_USER} DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;
+  GRANT ALL ON ${MYSQL_USER}.* TO '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_USER_PW}';
+  FLUSH PRIVILEGES;
+_EOQ_
+
+# create MariaDB.list
+cat > /etc/apt/sources.list.d/MariaDB.list <<_EOL_
+# MariaDB 10.2 repository list
+# http://downloads.mariadb.org/mariadb/repositories/
+deb [arch=amd64,i386] http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main
+deb-src http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main
+_EOL_ 
+
+cmn_echo_info "MariaDB installed."
+
+# 7. Update php.ini
+cmn_echo_info "Updating php.ini..."
+cmn_replace_in_files "upload_max_filesize = 2M" "upload_max_filesize = 256M" "/etc/php/7.0/fpm/php.ini"
+cmn_replace_in_files "post_max_size = 8M" "post_max_size = 256M" "/etc/php/7.0/fpm/php.ini"
+service php7.0-fpm restart
+cmn_echo_info "php.ini updated."
+
+# 8. Tell nginx to use PHP7-FPM
+
+cmn_echo_info "Adding php7.0-fpm to nginx..."
+
+cmn_replace_in_files "ssl_" "#ssl_" "/etc/nginx/nginx.conf"
+
+if [[ "${DOMAIN}" =~ ^www\..* ]]; then
+  DOMAIN="${DOMAIN/www\./}"
+fi
+
+WWW_DOMAIN="www.${DOMAIN}"
+
+cat > /etc/nginx/sites-available/default <<_EOC_
+server {
+  listen 80 default_server;
+  listen [::]:80 default_server;
+
+  root /var/www/html;
+  index index.php index.html;
+
+  server_name ${DOMAIN} ${WWW_DOMAIN};
+
+  location / {
+    try_files $uri $uri/ =404;
+  }
+
+  location ~ \.php$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:/run/php/php7.0-fpm.sock;
+  }
+
+  location ~ /\.ht {
+    deny all;
+  }
+}
+_EOC_
+
+service nginx restart
+
+cmn_echo_info "php7.0-fpm added to nginx."
+
+# 9. Install SSL certificates
+
+cmn_echo_info "Installing SSL certificates..."
+
+certbot -n --agree-tos -m ${EMAIL} --nginx --redirect -d ${DOMAIN} -d ${WWW_DOMAIN}
+
+openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048
+
+cat >> /etc/letsencrypt/options-ssl-nginx.conf <<_EOO_
+# manually added
+ssl_ecdh_curve secp384r1;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload";
+add_header X-Frame-Options SAMEORIGIN;
+add_header X-Content-Type-Options nosniff;
+ 
+ssl_dhparam /etc/ssl/certs/dhparam.pem; # uses our Diffie-Hellman group
+_EOO_
+
+crontab -l | { cata; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log" } | crontab -
+crontab -l | { cata; echo "35 2 * * 1 /bin/systemctl reload nginx" } | crontab -
+
+cmn_echo_info "SSL certificates installed."
+
+# 10. Install WordPress
+
+cmn_echo_info "Install WordPress..."
+
+# get the wp cli tool
+curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+chmod +x wp-cli.phar
+mv wp-cli.phar /usr/local/bin/wp
+
+rm /var/www/html/index.*
+wp core download --path=/var/www/html
+chown -R www-data:www-data /var/www/html
+wp core config --path=/var/www/html --dbname=${MYSQL_USER} --dbuser=${MYSQL_USER} --dbpass=${MYSQL_USER_PW} 
+wp core install --path=/var/www/html --url="https://${DOMAIN}" --title=${SITE_NAME} \
+  --admin_user=${ADMIN_USER} --admin_password=${ADMIN_PW} --admin_email=${ADMIN_EMAIL}
+
+wp option update timezone_string "America/New_York"
+
+wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard
+wp rewrite flush --hard
+
+if [[ "${WP_THEME}" != '' ]]; then
+  wp theme install ${WP_THEME} --activate
+fi
+
+wp plugin delete hello
+wp plugin install nginx-helper --activate
+wp plugin install mailgun --activate
+if ${USE_JETPACK}; then
+  wp plugin install jetpack --activate
+fi
+
+cmn_echo_info "WordPress installed."
+
+# 11. Update nginx config
+
+cmn_echo_info "Updating nginx configuration..."
+
+cat > /etc/nginx/sites-available/default <<_EOC_
+fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
+fastcgi_cache_key "$scheme$request_method$host$request_uri";
+fastcgi_cache_use_stale error timeout invalid_header http_500;
+fastcgi_ignore_headers Cache-Control Expires Set-Cookie;
+
+server {
+  listen 80 default_server;
+  listen [::]:80 default_server;
+  listen 443 ssl http2 default_server;
+  listen [::]:443 ssl http2 default_server;
+  ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem; # managed by Certbot
+  ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem; # managed by Certbot
+  include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+
+  # force redirect to HTTPS from HTTP
+  if ($scheme != "https") {
+    return 301 https://$host$request_uri;
+  }
+
+  client_max_body_size 256M;
+  root /var/www/html;
+  index index.php index.html;
+
+  server_name ${DOMAIN} ${WWW_DOMAIN};
+
+  set $skip_cache 0;
+
+  if ($request_method = POST) {
+    set $skip_cache 1;
+  }
+
+  if ($query_string != "") {
+    set $skip_cache 1;
+  }
+
+  if ($request_uri ~* "/wp-admin/|/xmlrpc.php|wp-.*.php|/feed/|index.php|sitemap(_index)?.xml") {
+    set $skip_cache 1;
+  }
+
+  if ($http_cookie ~* "comment_author|wordpress_[a-f0-9]+|wp-postpass|wordpress_no_cache|wordpress_logged_in") {
+    set $skip_cache 1;
+  }
+
+  location ~ /purge(/.*) {
+    fastcgi_cache_purge WORDPRESS "$scheme$request_method$host$1";
+  }
+
+  location / {
+    try_files $uri $uri/ /index.php?$args;
+  }
+
+  # Turn off directory indexing
+  autoindex off;
+
+  # Deny access to htaccess and other hidden files
+  location ~ /\. {
+    deny  all;
+  }
+
+  # Deny access to wp-config.php file
+  location = /wp-config.php {
+    deny all;
+  }
+
+  # Deny access to revealing or potentially dangerous files in the /wp-content/ directory (including sub-folders)
+  location ~* ^/wp-content/.*\.(txt|md|exe|sh|bak|inc|pot|po|mo|log|sql)$ {
+    deny all;
+  }
+
+  # Stop php access except to needed files in wp-includes
+  location ~* ^/wp-includes/.*(?<!(js/tinymce/wp-tinymce))\.php$ {
+    internal; #internal allows ms-files.php rewrite in multisite to work
+  }
+
+  # Specifically locks down upload directories in case full wp-content rule below is skipped
+  location ~* /(?:uploads|files)/.*\.php$ {
+    deny all;
+  }
+
+  # Deny direct access to .php files in the /wp-content/ directory (including sub-folders).
+  # Note this can break some poorly coded plugins/themes, replace the plugin or remove this block if it causes trouble
+  location ~* ^/wp-content/.*\.php$ {
+    deny all;
+  }
+
+  location = /favicon.ico {
+    log_not_found off;
+    access_log off;
+  }
+
+  location = /robots.txt {
+    access_log off;
+    log_not_found off;
+  }
+
+  location ~ \.php$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:/run/php/php7.0-fpm.sock;
+    fastcgi_cache_bypass $skip_cache;
+    fastcgi_no_cache $skip_cache;
+    fastcgi_cache WORDPRESS;
+    fastcgi_cache_valid 60m;
+    include fastcgi_params;
+  }
+}
+_EOC_
+
+service nginx restart
+
+cmn_echo_info "nginx configuration updated."
+
+# 12. Enable admin emails
+
+if [[ '' != "${MG_USERNAME}" ]]; then
+  cmn_echo_info "Enabling admin emails..."
+  debconf-set-selections <<< "postfix postfix/mailname string ${DOMAIN}"
+  debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"
+  apt-get install -y postfix mailutils libsasl2-2 ca-certificates libsasl2-modules
+  #cmn_replace_in_files "mydestination = ???" "mydestination = localhost.$myhostname, localhost" "/etc/postfix/main.cf"
+  cmn_replace_in_files "relayhost =" "relayhost = [smtp.mailgun.org]:587" "/etc/postfix/main.cf"
+  cat >> etc/postfix/main.cf <<_EOC_
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous
+smtp_tls_CAfile = /etc/postfix/cacert.pem
+smtp_use_tls = yes
+_EOC_
+  echo "[smtp.mailgun.org]:587 ${MG_USERNAME}:${MG_PW}" > /etc/postfix/sasl_passwd
+  chmod 400 /etc/postfix/sasl_passwd
+  postmap /etc/postfix/sasl_passwd
+  cat /etc/ssl/cers/thawte_Primary_Root_CA.pem | tee -a /etc/postfix/cacert.pem
+  /etc/init.d/postfix reload
+  cmn_echo_info "Admin emails enabled."
+fi
+
+# 13. Set up unattended upgrades
+
+cmn_echo_info "Setting up unattended upgrades..."
+
+cat > /etc/apt/apt.conf.d/50unattended-upgrades <<_EOC_
+Unattended-Upgrade::Allowed-Origins {
+        "${distro_id}:${distro_codename}-security";
+        "${distro_id}:${distro_codename}-updates";
+        "${distro_id}ESM:${distro_codename}";
+};
+Unattended-Upgrade::Mail "${EMAIL}";
+Unattended-Upgrade::MailOnlyOnError "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "02:00";
+_EOC_
+
+cat > /etc/apt/apt.conf.d/10periodic <<_EOC_
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+_EOC_
+
+cmn_echo_info "Unattended upgrades setup complete."
+
+# 14. Setup Swap
+
+if $USE_SWAP; then
+  cmn_echo_info "Setting up swap..."
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+  sysctl vm.swappiness=10
+  sysctl vm.vfs_cache_pressure=50
+  echo 'vm.swappiness=10' | tee -a /etc/sysctl.conf
+  echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf
+  cmn_echo_info "Swap setup complete."
+fi
+
+# 15. Create non-root user for subsequent logins
+
+cmn_echo_info "Creating non-root user for future logins..."
+adduser --disabled-password --gecos '' "${USERNAME}"
+chpasswd <<< "${USERNAME}:${USERPW}"
+usermod -aG sudo "${USERNAME}"
+mkdir /user/${USERNAME}/.ssh
+cp /root/.ssh/authorized_keys /home/${USERNAME}/.ssh/
+chmod 700 /user/${USERNAME}/.ssh
+chmod 600 /user/${USERNAME}/.ssh/authorized_keys
+cmn_replace_in_files "PermitRootLogin yes" "PermitRootLogin no" "/etc/ssh/sshd_config"
+systemctl --force reload sshd
+cmn_echo_info "Non-root user for future logins created."
+
+# 16. Update firewall
+cmn_echo_info "Updating firewall..."
+ufw allow OpenSSH
+ufl allow "Nginx Full"
+ufw enable
+cmn_echo_info "Firewall updated."
