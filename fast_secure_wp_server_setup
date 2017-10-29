@@ -513,8 +513,8 @@ add_header X-Content-Type-Options nosniff;
 ssl_dhparam /etc/ssl/certs/dhparam.pem; # uses our Diffie-Hellman group
 EOO
 
-crontab -l | { cata; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log" } | crontab -
-crontab -l | { cata; echo "35 2 * * 1 /bin/systemctl reload nginx" } | crontab -
+crontab -l | { cat; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log" } | crontab -
+crontab -l | { cat; echo "35 2 * * 1 /bin/systemctl reload nginx" } | crontab -
 
 cmn_echo_info "SSL certificates installed."
 
