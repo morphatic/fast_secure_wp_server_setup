@@ -255,14 +255,14 @@ function cmn_ask_for_password {
 function cmn_ask_for_password_twice {
   local VARIABLE_NAME=${1}
   local MESSAGE=${2}
-  local PWTYPE=${3:=other}
+  local PWTYPE=${3:-other}
   local VARIABLE_NAME_1="${VARIABLE_NAME}_1"
   local VARIABLE_NAME_2="${VARIABLE_NAME}_2"
 
   cmn_ask_for_password "${VARIABLE_NAME_1}" "${MESSAGE}"
   cmn_ask_for_password "${VARIABLE_NAME_2}" "${MESSAGE} (again)"
 
-  while [[ "${!VARIABLE_NAME_1}" != "${!VARIABLE_NAME_2}" ]] || $(not_valid_password ${!VARIABLE_NAME_2}); do
+  while [[ "${!VARIABLE_NAME_1}" != "${!VARIABLE_NAME_2}" ]] || $(not_valid_password ${!VARIABLE_NAME_2} ${PWTYPE}); do
     if [[ "${!VARIABLE_NAME_1}" != "${!VARIABLE_NAME_2}" ]]; then
       cmn_echo_important "Oops! The passwords did not match!"
     else
@@ -389,6 +389,12 @@ else
   USE_SWAP=false
 fi
 
+if [[ "${DOMAIN}" =~ ^www\..* ]]; then
+  DOMAIN="${DOMAIN/www\./}"
+fi
+
+WWW_DOMAIN="www.${DOMAIN}"
+
 # 4. Install necessary software keys and repositories
 cmn_echo_info "Installing necesary software keys and repositories..."
 
@@ -423,23 +429,23 @@ debconf-set-selections <<< "mariadb-server mysql-server/root_password_again pass
 apt-get install -y mariadb-server
 
 # run necessary MariaDB queries
-mysql -u "root" -p${MYSQL_ROOT_PW} <<_EOQ_
-  DELETE FROM mysql.user WHERE User='';
-  DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
-  DROP DATABASE IF EXISTS test;
-  DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-  CREATE DATABASE ${MYSQL_USER} DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;
-  GRANT ALL ON ${MYSQL_USER}.* TO '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_USER_PW}';
-  FLUSH PRIVILEGES;
-_EOQ_
+mysql -u "root" -p${MYSQL_ROOT_PW} <<EOQ
+DELETE FROM mysql.user WHERE User='';
+DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');
+DROP DATABASE IF EXISTS test;
+DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+CREATE DATABASE ${MYSQL_USER} DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci;
+GRANT ALL ON ${MYSQL_USER}.* TO '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYSQL_USER_PW}';
+FLUSH PRIVILEGES;
+EOQ
 
 # create MariaDB.list
-cat > /etc/apt/sources.list.d/MariaDB.list <<_EOL_
+cat > /etc/apt/sources.list.d/MariaDB.list <<EOL
 # MariaDB 10.2 repository list
 # http://downloads.mariadb.org/mariadb/repositories/
 deb [arch=amd64,i386] http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main
 deb-src http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main
-_EOL_ 
+EOL
 
 cmn_echo_info "MariaDB installed."
 
@@ -456,13 +462,7 @@ cmn_echo_info "Adding php7.0-fpm to nginx..."
 
 cmn_replace_in_files "ssl_" "#ssl_" "/etc/nginx/nginx.conf"
 
-if [[ "${DOMAIN}" =~ ^www\..* ]]; then
-  DOMAIN="${DOMAIN/www\./}"
-fi
-
-WWW_DOMAIN="www.${DOMAIN}"
-
-cat > /etc/nginx/sites-available/default <<_EOC_
+cat > /etc/nginx/sites-available/default <<EOC
 server {
   listen 80 default_server;
   listen [::]:80 default_server;
@@ -485,7 +485,7 @@ server {
     deny all;
   }
 }
-_EOC_
+EOC
 
 service nginx restart
 
@@ -499,7 +499,7 @@ certbot -n --agree-tos -m ${EMAIL} --nginx --redirect -d ${DOMAIN} -d ${WWW_DOMA
 
 openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048
 
-cat >> /etc/letsencrypt/options-ssl-nginx.conf <<_EOO_
+cat >> /etc/letsencrypt/options-ssl-nginx.conf <<EOO
 # manually added
 ssl_ecdh_curve secp384r1;
 ssl_session_tickets off;
@@ -510,9 +510,8 @@ resolver_timeout 5s;
 add_header Strict-Transport-Security "max-age=63072000; includeSubdomains; preload";
 add_header X-Frame-Options SAMEORIGIN;
 add_header X-Content-Type-Options nosniff;
- 
 ssl_dhparam /etc/ssl/certs/dhparam.pem; # uses our Diffie-Hellman group
-_EOO_
+EOO
 
 crontab -l | { cata; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log" } | crontab -
 crontab -l | { cata; echo "35 2 * * 1 /bin/systemctl reload nginx" } | crontab -
@@ -557,7 +556,7 @@ cmn_echo_info "WordPress installed."
 
 cmn_echo_info "Updating nginx configuration..."
 
-cat > /etc/nginx/sites-available/default <<_EOC_
+cat > /etc/nginx/sites-available/default <<EOC
 fastcgi_cache_path /var/run/nginx-cache levels=1:2 keys_zone=WORDPRESS:100m inactive=60m;
 fastcgi_cache_key "$scheme$request_method$host$request_uri";
 fastcgi_cache_use_stale error timeout invalid_header http_500;
@@ -663,7 +662,7 @@ server {
     include fastcgi_params;
   }
 }
-_EOC_
+EOC
 
 service nginx restart
 
@@ -678,13 +677,13 @@ if [[ '' != "${MG_USERNAME}" ]]; then
   apt-get install -y postfix mailutils libsasl2-2 ca-certificates libsasl2-modules
   #cmn_replace_in_files "mydestination = ???" "mydestination = localhost.$myhostname, localhost" "/etc/postfix/main.cf"
   cmn_replace_in_files "relayhost =" "relayhost = [smtp.mailgun.org]:587" "/etc/postfix/main.cf"
-  cat >> etc/postfix/main.cf <<_EOC_
+  cat >> etc/postfix/main.cf <<EOC
 smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 smtp_sasl_security_options = noanonymous
 smtp_tls_CAfile = /etc/postfix/cacert.pem
 smtp_use_tls = yes
-_EOC_
+EOC
   echo "[smtp.mailgun.org]:587 ${MG_USERNAME}:${MG_PW}" > /etc/postfix/sasl_passwd
   chmod 400 /etc/postfix/sasl_passwd
   postmap /etc/postfix/sasl_passwd
@@ -697,25 +696,25 @@ fi
 
 cmn_echo_info "Setting up unattended upgrades..."
 
-cat > /etc/apt/apt.conf.d/50unattended-upgrades <<_EOC_
+cat > /etc/apt/apt.conf.d/50unattended-upgrades <<EOC
 Unattended-Upgrade::Allowed-Origins {
-        "${distro_id}:${distro_codename}-security";
-        "${distro_id}:${distro_codename}-updates";
-        "${distro_id}ESM:${distro_codename}";
+  "\${distro_id}:\${distro_codename}-security";
+  "\${distro_id}:\${distro_codename}-updates";
+  "\${distro_id}ESM:\${distro_codename}";
 };
 Unattended-Upgrade::Mail "${EMAIL}";
 Unattended-Upgrade::MailOnlyOnError "true";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-Time "02:00";
-_EOC_
+EOC
 
-cat > /etc/apt/apt.conf.d/10periodic <<_EOC_
+cat > /etc/apt/apt.conf.d/10periodic <<EOC
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Download-Upgradeable-Packages "1";
 APT::Periodic::AutocleanInterval "7";
 APT::Periodic::Unattended-Upgrade "1";
-_EOC_
+EOC
 
 cmn_echo_info "Unattended upgrades setup complete."
 
