@@ -348,6 +348,7 @@ DOMAIN=''
 MYSQL_ROOT_PW=''
 MYSQL_USER=''
 MYSQL_USER_PW=''
+MYSQL_PREFIX=''
 USING_MAILGUN=true
 MG_USERNAME=''
 MG_PW=''
@@ -373,6 +374,10 @@ while [[ "${MYSQL_USER}" == 'root' || ! "${MYSQL_USER}" =~ [a-z_][a-z0-9_-]{1,31
   read -p "${valid_username_message}" MYSQL_USER
 done
 cmn_ask_for_password_twice "MYSQL_USER_PW" "Enter a password for ${MYSQL_USER}"
+read -p 'What prefix would you like to use for your DB tables? ' MYSQL_PREFIX
+while [[ ! "${MYSQL_PREFIX}" =~ [a-zA-Z][a-zA-Z0-9_]{1,7} ]]; do
+  read -p "Please select a short prefix (like 'mydb_') other than 'wp_': " MYSQL_PREFIX
+done
 seek_confirmation 'Will you be using mailgun to send admin messages from the server'
 if is_confirmed; then
   USING_MAILGUN=true
@@ -420,6 +425,11 @@ if [[ "${DOMAIN}" =~ ^www\..* ]]; then
 fi
 
 WWW_DOMAIN="www.${DOMAIN}"
+
+# append an underscore to the DB prefix if it doesn't exist
+if [[ ! "${MYSQL_PREFIX}" =~ .*?_$ ]]; then
+  MYSQL_PREFIX="${MYSQL_PREFIX}_"
+fi
 
 # 4. Install necessary software keys and repositories
 cmn_echo_info "Installing necesary software keys and repositories..."
