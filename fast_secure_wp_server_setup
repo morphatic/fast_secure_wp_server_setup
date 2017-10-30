@@ -590,6 +590,7 @@ if ! id "${USERNAME}" >/dev/null 2>&1; then
   cp /root/.ssh/authorized_keys /home/${USERNAME}/.ssh/
   chmod 700 /home/${USERNAME}/.ssh
   chmod 600 /home/${USERNAME}/.ssh/authorized_keys
+  chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}
   cmn_replace_in_files "PermitRootLogin yes" "PermitRootLogin no" "/etc/ssh/sshd_config"
   systemctl --force reload sshd
   cmn_echo_info "Non-root user for future logins created."
@@ -852,6 +853,6 @@ fi
 # 16. Update firewall
 cmn_echo_info "Updating firewall..."
 ufw allow OpenSSH
-ufl allow "Nginx Full"
+ufw allow "Nginx Full"
 ufw enable
 cmn_echo_info "Firewall updated."
