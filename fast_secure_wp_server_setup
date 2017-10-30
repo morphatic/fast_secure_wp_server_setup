@@ -593,33 +593,48 @@ if [[ ! -f /var/www/html/wp-config.php ]]; then
   # give new user ownership of /var/www/html
   chown -R ${USERNAME}:${USERNAME} /var/www/html
 
-  # get the wp cli tool
-  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-  chmod +x wp-cli.phar
-  mv wp-cli.phar /usr/local/bin/wp
+  if [[ ! -f /usr/local/bin/wp ]]; then
+    # get the wp cli tool
+    curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+    chmod +x wp-cli.phar
+    mv wp-cli.phar /usr/local/bin/wp
+  fi
 
-  if ls /var/www/html/index.* 1> /dev/null 2>&1>; then
+  if ls /var/www/html/index.* 1> /dev/null 2>&1; then
     rm /var/www/html/index.*
   fi
-  sudo -u ${USERNAME} -- wp core download --path=/var/www/html
-  sudo -u ${USERNAME} -- wp core config --path=/var/www/html --dbname=${MYSQL_USER} --dbuser=${MYSQL_USER} --dbpass=${MYSQL_USER_PW} 
-  sudo -u ${USERNAME} -- wp core install --path=/var/www/html --url="https://${DOMAIN}" --title=${SITE_NAME} \
-    --admin_user=${ADMIN_USER} --admin_password=${ADMIN_PW} --admin_email=${ADMIN_EMAIL}
 
-  sudo -u ${USERNAME} -- wp option update timezone_string "America/New_York"
-
-  sudo -u ${USERNAME} -- wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard
-  sudo -u ${USERNAME} -- wp rewrite flush --hard
-
-  if [[ "${WP_THEME}" != '' ]]; then
-    sudo -u ${USERNAME} -- wp theme install ${WP_THEME} --activate
+  # make sure core files are downloaded
+  if [[ ! -f /var/www/html/wp-blog-header.php ]]; then
+    sudo -u ${USERNAME} -- wp core download --path=/var/www/html
   fi
 
-  sudo -u ${USERNAME} -- wp plugin delete hello
-  sudo -u ${USERNAME} -- wp plugin install nginx-helper --activate
-  sudo -u ${USERNAME} -- wp plugin install mailgun --activate
-  if ${USE_JETPACK}; then
-    sudo -u ${USERNAME} -- wp plugin install jetpack --activate
+  # make sure the wp-config.php has been setup
+  if [[ ! -f /var/www/html/wp-config.php ]]; then
+    sudo -u ${USERNAME} -- wp config create --dbname="${MYSQL_USER}" --dbuser="${MYSQL_USER}" --dbpass="${MYSQL_USER_PW}" --dbprefix="${MYSQL_PREFIX}"
+  fi
+
+  # make sure WP is installed
+  if ! $(sudo -u ${USERNAME} -- wp core is_installed); then
+    sudo -u ${USERNAME} -- wp core install --path=/var/www/html --url="https://${DOMAIN}" --title="${SITE_NAME}" \
+      --admin_user="${ADMIN_USER}" --admin_password="${ADMIN_PW}" --admin_email="${ADMIN_EMAIL}"
+
+    # setup options, plugins, themes, etc.
+    sudo -u ${USERNAME} -- wp option update timezone_string "America/New_York"
+
+    sudo -u ${USERNAME} -- wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard
+    sudo -u ${USERNAME} -- wp rewrite flush --hard
+
+    if [[ "${WP_THEME}" != '' ]]; then
+      sudo -u ${USERNAME} -- wp theme install ${WP_THEME} --activate
+    fi
+
+    sudo -u ${USERNAME} -- wp plugin delete hello
+    sudo -u ${USERNAME} -- wp plugin install nginx-helper --activate
+    sudo -u ${USERNAME} -- wp plugin install mailgun --activate
+    if ${USE_JETPACK}; then
+      sudo -u ${USERNAME} -- wp plugin install jetpack --activate
+    fi
   fi
 
   # transfer ownership to www-data
