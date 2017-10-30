@@ -571,7 +571,7 @@ cmn_echo_info "SSL certificates installed."
 
 # 10. Create non-root user for subsequent logins
 
-if id "${USERNAME}" >/dev/null 2>&1; then
+if ! id "${USERNAME}" >/dev/null 2>&1; then
   cmn_echo_info "Creating non-root user for future logins..."
   adduser --disabled-password --gecos '' "${USERNAME}"
   chpasswd <<< "${USERNAME}:${USERPW}"
