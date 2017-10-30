@@ -625,7 +625,7 @@ if [[ ! -f /var/www/html/wp-config.php ]]; then
   fi
 
   # make sure WP is installed
-  if ! $(sudo -u ${USERNAME} -- wp core is_installed); then
+  if ! $(sudo -u ${USERNAME} -- wp core is-installed --path=/var/www/html); then
     sudo -u ${USERNAME} -- wp core install --path=/var/www/html --url="https://${DOMAIN}" --title="${SITE_NAME}" \
       --admin_user="${ADMIN_USER}" --admin_password="${ADMIN_PW}" --admin_email="${ADMIN_EMAIL}"
 
@@ -636,14 +636,26 @@ if [[ ! -f /var/www/html/wp-config.php ]]; then
     sudo -u ${USERNAME} -- wp rewrite flush --hard --path=/var/www/html
 
     if [[ "${WP_THEME}" != '' ]]; then
-      sudo -u ${USERNAME} -- wp theme install ${WP_THEME} --activate --path=/var/www/html
+      sudo -u ${USERNAME} -- wp theme install ${WP_THEME} --path=/var/www/html
+      if $(sudo -u ${USERNAME} -- wp theme is-installed ${WP_THEME} --path=/var/www/html); then
+        sudo -u ${USERNAME} -- wp theme activate ${WP_THEME} --path=/var/www/html
+      fi
     fi
 
     sudo -u ${USERNAME} -- wp plugin delete hello --path=/var/www/html
-    sudo -u ${USERNAME} -- wp plugin install nginx-helper --activate --path=/var/www/html
-    sudo -u ${USERNAME} -- wp plugin install mailgun --activate --path=/var/www/html
+    sudo -u ${USERNAME} -- wp plugin install nginx-helper --path=/var/www/html
+    if $(sudo -u ${USERNAME} -- wp plugin is-installed nginx-helper --path=/var/www/html); then
+      sudo -u ${USERNAME} -- wp plugin activate nginx-helper --path=/var/www/html
+    fi
+    sudo -u ${USERNAME} -- wp plugin install mailgun --path=/var/www/html
+    if $(sudo -u ${USERNAME} -- wp plugin is-installed mailgun --path=/var/www/html); then
+      sudo -u ${USERNAME} -- wp plugin activate mailgun --path=/var/www/html
+    fi
     if ${USE_JETPACK}; then
-      sudo -u ${USERNAME} -- wp plugin install jetpack --activate --path=/var/www/html
+      sudo -u ${USERNAME} -- wp plugin install jetpack --path=/var/www/html
+      if $(sudo -u ${USERNAME} -- wp plugin is-installed jetpack --path=/var/www/html); then
+        sudo -u ${USERNAME} -- wp plugin activate jetpack --path=/var/www/html
+      fi
     fi
   fi
 
