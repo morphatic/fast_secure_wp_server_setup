@@ -792,7 +792,7 @@ if [[ '' != "${MG_USERNAME}" && ! -f "/etc/postfix/main.cf" ]]; then
   cmn_replace_in_files "mydestination" "#mydestination" "/etc/postfix/main.cf"
   cmn_replace_in_files "relayhost" "#relayhost" "/etc/postfix/main.cf"
   cat >> /etc/postfix/main.cf <<EOC
-mydestination = localhost.$myhostname, localhost
+mydestination = localhost.\$myhostname, localhost
 relayhost = [smtp.mailgun.org]:587
 smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
