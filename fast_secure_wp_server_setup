@@ -353,6 +353,12 @@ MG_USERNAME=''
 MG_PW=''
 EMAIL=''
 USE_SWAP=true
+SITE_NAME=''
+ADMIN_USER=''
+ADMIN_PW=''
+ADMIN_EMAIL=''
+USE_JETPACK=false
+WP_THEME=''
 
 # 3. get values for the variables from the user
 read -p 'Pick a username other than "root" to use on your server: ' USERNAME
@@ -388,6 +394,26 @@ if is_confirmed; then
 else
   USE_SWAP=false
 fi
+read -p 'What will be the name of the new website: ' SITE_NAME
+while [[ "${SITE_NAME}" == '' ]]; do
+  read -p 'The site name cannot be blank. Please choose a site name: ' SITE_NAME
+done
+read -p 'Pick a username for the admin user of your website: ' ADMIN_USER
+while [[ ! "${ADMIN_USER}" =~ [a-z_][a-z0-9_-]{1,31} ]]; do
+  read -p "${valid_username_message}" ADMIN_USER
+done
+cmn_ask_for_password_twice "ADMIN_PW" "Enter a password for ${ADMIN_USER}"
+read -p 'What is the email address of the admin user for your site: ' ADMIN_EMAIL
+while [[ ! "${ADMIN_EMAIL}" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$ ]]; do
+  read -p 'That was not a valid email address. Please enter an email address for the admin user: ' ADMIN_EMAIL
+done
+seek_confirmation 'Do you want to use Jetpack in your new site?'
+if is_confirmed; then
+  USE_JETPACK=true
+else
+  USE_JETPACK=false
+fi
+read -p 'If you want to pre-install a theme, enter the slug here, or hit enter to skip: ' WP_THEME
 
 if [[ "${DOMAIN}" =~ ^www\..* ]]; then
   DOMAIN="${DOMAIN/www\./}"
@@ -543,41 +569,70 @@ fi
 
 cmn_echo_info "SSL certificates installed."
 
-# 10. Install WordPress
+# 10. Create non-root user for subsequent logins
 
-cmn_echo_info "Install WordPress..."
-
-# get the wp cli tool
-curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-chmod +x wp-cli.phar
-mv wp-cli.phar /usr/local/bin/wp
-
-rm /var/www/html/index.*
-wp core download --path=/var/www/html
-chown -R www-data:www-data /var/www/html
-wp core config --path=/var/www/html --dbname=${MYSQL_USER} --dbuser=${MYSQL_USER} --dbpass=${MYSQL_USER_PW} 
-wp core install --path=/var/www/html --url="https://${DOMAIN}" --title=${SITE_NAME} \
-  --admin_user=${ADMIN_USER} --admin_password=${ADMIN_PW} --admin_email=${ADMIN_EMAIL}
-
-wp option update timezone_string "America/New_York"
-
-wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard
-wp rewrite flush --hard
-
-if [[ "${WP_THEME}" != '' ]]; then
-  wp theme install ${WP_THEME} --activate
+if id "${USERNAME}" >/dev/null 2>&1; then
+  cmn_echo_info "Creating non-root user for future logins..."
+  adduser --disabled-password --gecos '' "${USERNAME}"
+  chpasswd <<< "${USERNAME}:${USERPW}"
+  usermod -aG sudo "${USERNAME}"
+  mkdir /user/${USERNAME}/.ssh
+  cp /root/.ssh/authorized_keys /home/${USERNAME}/.ssh/
+  chmod 700 /user/${USERNAME}/.ssh
+  chmod 600 /user/${USERNAME}/.ssh/authorized_keys
+  cmn_replace_in_files "PermitRootLogin yes" "PermitRootLogin no" "/etc/ssh/sshd_config"
+  systemctl --force reload sshd
+  cmn_echo_info "Non-root user for future logins created."
 fi
 
-wp plugin delete hello
-wp plugin install nginx-helper --activate
-wp plugin install mailgun --activate
-if ${USE_JETPACK}; then
-  wp plugin install jetpack --activate
+# 11. Install WordPress
+
+if [[ ! -f /var/www/html/wp-config.php ]]; then
+  cmn_echo_info "Install WordPress..."
+
+  # give new user ownership of /var/www/html
+  chown -R ${USERNAME}:${USERNAME} /var/www/html
+
+  # switch to WP user 
+  su - ${USERNAME}
+
+  # get the wp cli tool
+  curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+  chmod +x wp-cli.phar
+  mv wp-cli.phar /usr/local/bin/wp
+
+  rm /var/www/html/index.*
+  wp core download --path=/var/www/html
+  chown -R www-data:www-data /var/www/html
+  wp core config --path=/var/www/html --dbname=${MYSQL_USER} --dbuser=${MYSQL_USER} --dbpass=${MYSQL_USER_PW} 
+  wp core install --path=/var/www/html --url="https://${DOMAIN}" --title=${SITE_NAME} \
+    --admin_user=${ADMIN_USER} --admin_password=${ADMIN_PW} --admin_email=${ADMIN_EMAIL}
+
+  wp option update timezone_string "America/New_York"
+
+  wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard
+  wp rewrite flush --hard
+
+  if [[ "${WP_THEME}" != '' ]]; then
+    wp theme install ${WP_THEME} --activate
+  fi
+
+  wp plugin delete hello
+  wp plugin install nginx-helper --activate
+  wp plugin install mailgun --activate
+  if ${USE_JETPACK}; then
+    wp plugin install jetpack --activate
+  fi
+
+  # transfer ownership to www-data
+  chown -R www-data:www-data /var/www/html
+
+  exit
+
+  cmn_echo_info "WordPress installed."
 fi
 
-cmn_echo_info "WordPress installed."
-
-# 11. Update nginx config
+# 12. Update nginx config
 
 cmn_echo_info "Updating nginx configuration..."
 
@@ -693,16 +748,18 @@ service nginx restart
 
 cmn_echo_info "nginx configuration updated."
 
-# 12. Enable admin emails
+# 13. Enable admin emails
 
-if [[ '' != "${MG_USERNAME}" ]]; then
+if [[ '' != "${MG_USERNAME}" && ! -f "/etc/postfix/main.cf" ]]; then
   cmn_echo_info "Enabling admin emails..."
   debconf-set-selections <<< "postfix postfix/mailname string ${DOMAIN}"
   debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Site'"
   apt-get install -y postfix mailutils libsasl2-2 ca-certificates libsasl2-modules
-  #cmn_replace_in_files "mydestination = ???" "mydestination = localhost.$myhostname, localhost" "/etc/postfix/main.cf"
-  cmn_replace_in_files "relayhost =" "relayhost = [smtp.mailgun.org]:587" "/etc/postfix/main.cf"
+  cmn_replace_in_files "mydestination" "#mydestination" "/etc/postfix/main.cf"
+  cmn_replace_in_files "relayhost" "#relayhost" "/etc/postfix/main.cf"
   cat >> etc/postfix/main.cf <<EOC
+mydestination = localhost.$myhostname, localhost
+relayhost = [smtp.mailgun.org]:587
 smtp_sasl_auth_enable = yes
 smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 smtp_sasl_security_options = noanonymous
@@ -717,7 +774,7 @@ EOC
   cmn_echo_info "Admin emails enabled."
 fi
 
-# 13. Set up unattended upgrades
+# 14. Set up unattended upgrades
 
 cmn_echo_info "Setting up unattended upgrades..."
 
@@ -743,9 +800,9 @@ EOC
 
 cmn_echo_info "Unattended upgrades setup complete."
 
-# 14. Setup Swap
+# 15. Setup Swap
 
-if $USE_SWAP; then
+if $USE_SWAP && [[ ! -f /swapfile ]]; then
   cmn_echo_info "Setting up swap..."
   fallocate -l 2G /swapfile
   chmod 600 /swapfile
@@ -758,20 +815,6 @@ if $USE_SWAP; then
   echo 'vm.vfs_cache_pressure=50' | tee -a /etc/sysctl.conf
   cmn_echo_info "Swap setup complete."
 fi
-
-# 15. Create non-root user for subsequent logins
-
-cmn_echo_info "Creating non-root user for future logins..."
-adduser --disabled-password --gecos '' "${USERNAME}"
-chpasswd <<< "${USERNAME}:${USERPW}"
-usermod -aG sudo "${USERNAME}"
-mkdir /user/${USERNAME}/.ssh
-cp /root/.ssh/authorized_keys /home/${USERNAME}/.ssh/
-chmod 700 /user/${USERNAME}/.ssh
-chmod 600 /user/${USERNAME}/.ssh/authorized_keys
-cmn_replace_in_files "PermitRootLogin yes" "PermitRootLogin no" "/etc/ssh/sshd_config"
-systemctl --force reload sshd
-cmn_echo_info "Non-root user for future logins created."
 
 # 16. Update firewall
 cmn_echo_info "Updating firewall..."
