@@ -598,7 +598,9 @@ if [[ ! -f /var/www/html/wp-config.php ]]; then
   chmod +x wp-cli.phar
   mv wp-cli.phar /usr/local/bin/wp
 
-  rm /var/www/html/index.*
+  if ls /var/www/html/index.* 1> /dev/null 2>&1>; then
+    rm /var/www/html/index.*
+  fi
   sudo -u ${USERNAME} -- wp core download --path=/var/www/html
   sudo -u ${USERNAME} -- wp core config --path=/var/www/html --dbname=${MYSQL_USER} --dbuser=${MYSQL_USER} --dbpass=${MYSQL_USER_PW} 
   sudo -u ${USERNAME} -- wp core install --path=/var/www/html --url="https://${DOMAIN}" --title=${SITE_NAME} \
