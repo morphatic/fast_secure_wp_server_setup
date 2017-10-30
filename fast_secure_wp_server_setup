@@ -576,10 +576,10 @@ if ! id "${USERNAME}" >/dev/null 2>&1; then
   adduser --disabled-password --gecos '' "${USERNAME}"
   chpasswd <<< "${USERNAME}:${USERPW}"
   usermod -aG sudo "${USERNAME}"
-  mkdir /user/${USERNAME}/.ssh
+  mkdir /home/${USERNAME}/.ssh
   cp /root/.ssh/authorized_keys /home/${USERNAME}/.ssh/
-  chmod 700 /user/${USERNAME}/.ssh
-  chmod 600 /user/${USERNAME}/.ssh/authorized_keys
+  chmod 700 /home/${USERNAME}/.ssh
+  chmod 600 /home/${USERNAME}/.ssh/authorized_keys
   cmn_replace_in_files "PermitRootLogin yes" "PermitRootLogin no" "/etc/ssh/sshd_config"
   systemctl --force reload sshd
   cmn_echo_info "Non-root user for future logins created."
