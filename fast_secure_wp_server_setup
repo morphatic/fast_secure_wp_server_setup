@@ -535,7 +535,7 @@ EOO
 fi
 
 # do we need to add our crontab?
-if [[ ! -f '/var/spool/cron/crontabs/root' ]] || ! grep -q "certbot" "/var/spool/cron/crontab/root"; then
+if [[ ! -f '/var/spool/cron/crontabs/root' ]] || ! grep -q "certbot" "/var/spool/cron/crontabs/root"; then
   # yes, add it
   crontab -l | { cat; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log"; } | crontab -
   crontab -l | { cat; echo "35 2 * * 1 /bin/systemctl reload nginx"; } | crontab -
