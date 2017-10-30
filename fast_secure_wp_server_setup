@@ -621,7 +621,7 @@ if [[ ! -f /var/www/html/wp-config.php ]]; then
 
   # make sure the wp-config.php has been setup
   if [[ ! -f /var/www/html/wp-config.php ]]; then
-    sudo -u ${USERNAME} -- wp config create --dbname="${MYSQL_USER}" --dbuser="${MYSQL_USER}" --dbpass="${MYSQL_USER_PW}" --dbprefix="${MYSQL_PREFIX}"
+    sudo -u ${USERNAME} -- wp config create --path=/var/www/html --dbname="${MYSQL_USER}" --dbuser="${MYSQL_USER}" --dbpass="${MYSQL_USER_PW}" --dbprefix="${MYSQL_PREFIX}"
   fi
 
   # make sure WP is installed
@@ -630,20 +630,20 @@ if [[ ! -f /var/www/html/wp-config.php ]]; then
       --admin_user="${ADMIN_USER}" --admin_password="${ADMIN_PW}" --admin_email="${ADMIN_EMAIL}"
 
     # setup options, plugins, themes, etc.
-    sudo -u ${USERNAME} -- wp option update timezone_string "America/New_York"
+    sudo -u ${USERNAME} -- wp option update timezone_string "America/New_York" --path=/var/www/html
 
-    sudo -u ${USERNAME} -- wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard
-    sudo -u ${USERNAME} -- wp rewrite flush --hard
+    sudo -u ${USERNAME} -- wp rewrite structure '/%year%/%monthnum%/%day%/%postname%/' --hard --path=/var/www/html
+    sudo -u ${USERNAME} -- wp rewrite flush --hard --path=/var/www/html
 
     if [[ "${WP_THEME}" != '' ]]; then
-      sudo -u ${USERNAME} -- wp theme install ${WP_THEME} --activate
+      sudo -u ${USERNAME} -- wp theme install ${WP_THEME} --activate --path=/var/www/html
     fi
 
-    sudo -u ${USERNAME} -- wp plugin delete hello
-    sudo -u ${USERNAME} -- wp plugin install nginx-helper --activate
-    sudo -u ${USERNAME} -- wp plugin install mailgun --activate
+    sudo -u ${USERNAME} -- wp plugin delete hello --path=/var/www/html
+    sudo -u ${USERNAME} -- wp plugin install nginx-helper --activate --path=/var/www/html
+    sudo -u ${USERNAME} -- wp plugin install mailgun --activate --path=/var/www/html
     if ${USE_JETPACK}; then
-      sudo -u ${USERNAME} -- wp plugin install jetpack --activate
+      sudo -u ${USERNAME} -- wp plugin install jetpack --activate --path=/var/www/html
     fi
   fi
 
