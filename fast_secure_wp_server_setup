@@ -439,6 +439,7 @@ GRANT ALL ON ${MYSQL_USER}.* TO '${MYSQL_USER}'@'localhost' IDENTIFIED BY '${MYS
 FLUSH PRIVILEGES;
 EOQ
 
+if [[ ! -f /etc/apt/sources.list.d/MariaDB.list ]]; then
 # create MariaDB.list
 cat > /etc/apt/sources.list.d/MariaDB.list <<EOL
 # MariaDB 10.2 repository list
@@ -446,23 +447,31 @@ cat > /etc/apt/sources.list.d/MariaDB.list <<EOL
 deb [arch=amd64,i386] http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main
 deb-src http://nyc2.mirrors.digitalocean.com/mariadb/repo/10.2/ubuntu xenial main
 EOL
+fi
 
 cmn_echo_info "MariaDB installed."
 
 # 7. Update php.ini
-cmn_echo_info "Updating php.ini..."
-cmn_replace_in_files "upload_max_filesize = 2M" "upload_max_filesize = 256M" "/etc/php/7.0/fpm/php.ini"
-cmn_replace_in_files "post_max_size = 8M" "post_max_size = 256M" "/etc/php/7.0/fpm/php.ini"
-service php7.0-fpm restart
-cmn_echo_info "php.ini updated."
+if grep -q "upload_max_filesize = 2M" "/etc/php/7.0/fpm/php.ini" || grep -q "post_max_size = 8M" "/etc/php/7.0/fpm/php.ini"; then
+  cmn_echo_info "Updating php.ini..."
+
+  if grep -q "upload_max_filesize = 2M" "/etc/php/7.0/fpm/php.ini"; then
+    cmn_replace_in_files "upload_max_filesize = 2M" "upload_max_filesize = 256M" "/etc/php/7.0/fpm/php.ini"
+  fi
+  if grep -q "post_max_size = 8M" "/etc/php/7.0/fpm/php.ini"; then
+    cmn_replace_in_files "post_max_size = 8M" "post_max_size = 256M" "/etc/php/7.0/fpm/php.ini"
+  fi
+  service php7.0-fpm restart
+  cmn_echo_info "php.ini updated."
+fi
 
 # 8. Tell nginx to use PHP7-FPM
+if ! grep -q "php7.0-fpm.sock" "/etc/nginx/sites-available/default"; then
+  cmn_echo_info "Adding php7.0-fpm to nginx..."
 
-cmn_echo_info "Adding php7.0-fpm to nginx..."
+  cmn_replace_in_files "ssl_" "#ssl_" "/etc/nginx/nginx.conf"
 
-cmn_replace_in_files "ssl_" "#ssl_" "/etc/nginx/nginx.conf"
-
-cat > /etc/nginx/sites-available/default <<EOC
+  cat > /etc/nginx/sites-available/default <<EOC
 server {
   listen 80 default_server;
   listen [::]:80 default_server;
@@ -487,18 +496,29 @@ server {
 }
 EOC
 
-service nginx restart
+  service nginx restart
 
-cmn_echo_info "php7.0-fpm added to nginx."
-
+  cmn_echo_info "php7.0-fpm added to nginx."
+fi
 # 9. Install SSL certificates
 
 cmn_echo_info "Installing SSL certificates..."
 
-certbot -n --agree-tos -m ${EMAIL} --nginx --redirect -d ${DOMAIN} -d ${WWW_DOMAIN}
+# is there already a cert there?
+if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+  # no, so get one
+  certbot -n --agree-tos -m ${EMAIL} --nginx --redirect -d ${DOMAIN} -d ${WWW_DOMAIN}
+fi
 
-openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048
+# do we need to set up a Diffie-Helman group?
+if [[ ! -f /etc/ssl/certs/dhparam.pem ]]; then
+  # yes, set it up
+  openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048
+fi
 
+# have DH params already been added to options-ssl-nginx.conf?
+if ! grep -q "ssl_dhparam" "/etc/letsencrypt/options-ssl-nginx.conf"; then
+#no, so add them
 cat >> /etc/letsencrypt/options-ssl-nginx.conf <<EOO
 # manually added
 ssl_ecdh_curve secp384r1;
@@ -512,9 +532,14 @@ add_header X-Frame-Options SAMEORIGIN;
 add_header X-Content-Type-Options nosniff;
 ssl_dhparam /etc/ssl/certs/dhparam.pem; # uses our Diffie-Hellman group
 EOO
+fi
 
-crontab -l | { cat; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log" } | crontab -
-crontab -l | { cat; echo "35 2 * * 1 /bin/systemctl reload nginx" } | crontab -
+# do we need to add our crontab?
+if [[ ! -f '/var/spool/cron/crontabs/root' ]] || ! grep -q "certbot" "/var/spool/cron/crontab/root"; then
+  # yes, add it
+  crontab -l | { cat; echo "30 2 * * 1 /usr/bin/certbot renew >> /var/log/le-renew.log" } | crontab -
+  crontab -l | { cat; echo "35 2 * * 1 /bin/systemctl reload nginx" } | crontab -
+fi
 
 cmn_echo_info "SSL certificates installed."
 
