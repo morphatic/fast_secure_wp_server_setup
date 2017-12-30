@@ -497,6 +497,9 @@ if grep -q "upload_max_filesize = 2M" "/etc/php/7.0/fpm/php.ini" || grep -q "pos
   if grep -q "post_max_size = 8M" "/etc/php/7.0/fpm/php.ini"; then
     cmn_replace_in_files "post_max_size = 8M" "post_max_size = 256M" "/etc/php/7.0/fpm/php.ini"
   fi
+  if grep -q "memory_limit = 128M" "/etc/php/7.0/fpm/php.ini"; then
+    cmn_replace_in_files "memory_limit = 128M" "memory_limit = 256M" "/etc/php/7.0/fpm/php.ini"
+  fi
   service php7.0-fpm restart
   cmn_echo_info "php.ini updated."
 fi
